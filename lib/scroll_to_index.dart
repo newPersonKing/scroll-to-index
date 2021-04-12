@@ -217,6 +217,7 @@ mixin AutoScrollControllerMixin on ScrollController
 
     // In listView init or reload case, widget state of list item may not be ready for query.
     // this prevent from over scrolling becoming empty screen or unnecessary scroll bounce.
+    // ？？？？ todo 确保第一帧绘制完成
     Future makeSureStateIsReady() async {
       for (var count = 0; count < maxBound; count++) {
         if (_isEmptyStates) {
@@ -230,16 +231,20 @@ mixin AutoScrollControllerMixin on ScrollController
 
     await makeSureStateIsReady();
 
+    /*？？？？ todo !hasClients 代表 这个controller 还没有被绑定到任何可滑动的视图*/
     if (!hasClients) return null;
 
     // two cases,
     // 1. already has state. it's in viewport layout
     // 2. doesn't have state yet. it's not in viewport so we need to start scrolling to make it into layout range.
+    /*每个item 创建的时候 都会在 tagMap中注册 这里就会返回true  返回 false 证明 不在窗口中*/
     if (isIndexStateInLayoutRange(index)) {
       _isAutoScrolling = true;
 
+      /*preferPosition 枚举 定义滑动到哪个位置 顶部 居中 底部*/
       await _bringIntoViewportIfNeed(index, preferPosition,
           (double offset) async {
+        /*offset 滑动到指定位置 需要移动的距离 从初始状态开始计算的值*/
         await animateTo(offset, duration: duration, curve: Curves.ease);
         await _waitForWidgetStateBuild();
         return null;
@@ -266,7 +271,9 @@ mixin AutoScrollControllerMixin on ScrollController
       while (prevOffset != currentOffset &&
           !(contains = isIndexStateInLayoutRange(index))) {
         prevOffset = currentOffset;
+        /*todo 找出当前 tagMap中 距离 index 最近的一个*/
         final nearest = _getNearestIndex(index);
+        /*todo 计算尝试去移动的距离 moveTarget*/
         final moveTarget =
             _forecastMoveUnit(index, nearest, usedSuggestedRowHeightIfAny)!;
         if (moveTarget < 0) //can't forecast the move range
@@ -278,8 +285,12 @@ mixin AutoScrollControllerMixin on ScrollController
                 ? duration
                 : null;
         usedSuggestedRowHeightIfAny = false; // just use once
+
+        /*todo lastScrollDirection 定义的向上滑动 还是向下滑动*/
         lastScrollDirection = moveTarget - prevOffset > 0 ? 1 : 0;
+        /*当前滑动的距离 切换为 moveTarget*/
         currentOffset = moveTarget;
+        /*已经消耗掉的时间  todo moveDuration 计算的是多少*/
         spentDuration += suggestedDuration ?? moveDuration;
         final oldOffset = offset;
         await animateTo(currentOffset,
@@ -293,6 +304,7 @@ mixin AutoScrollControllerMixin on ScrollController
       }
       _isAutoScrolling = false;
 
+      /*再走一遍 item 滑动到窗口的逻辑*/
       if (contains && hasClients) {
         await _bringIntoViewportIfNeed(
             index, preferPosition ?? _alignmentToPosition(lastScrollDirection),
@@ -355,6 +367,7 @@ mixin AutoScrollControllerMixin on ScrollController
   /// it means if we do animation scrolling to a position, the Future call back will in [SchedulerPhase.midFrameMicrotasks].
   /// if we want to search viewport element depending on Widget State, we must delay it to [SchedulerPhase.persistentCallbacks].
   /// which is the phase widget build/layout/draw
+  /// ？？？？ todo 绘制完成
   Future _waitForWidgetStateBuild() => SchedulerBinding.instance!.endOfFrame;
 
   /// NOTE: this is used to forcase the nearestIndex. if the the index equals targetIndex,
@@ -364,18 +377,23 @@ mixin AutoScrollControllerMixin on ScrollController
     assert(targetIndex != currentNearestIndex);
     currentNearestIndex = currentNearestIndex ?? 0; //null as none of state
 
+    /*todo gy targetIndex > currentNearestIndex 向下滑动*/
     final alignment = targetIndex > currentNearestIndex ? 1.0 : 0.0;
     double? absoluteOffsetToViewport;
 
     if (tagMap[currentNearestIndex] == null) return -1;
 
+    /*如果每个item的 高度 suggestedRowHeight 是固定的 走这里*/
     if (useSuggested && suggestedRowHeight != null) {
       final indexDiff = (targetIndex - currentNearestIndex);
       final offsetToLastState = _offsetToRevealInViewport(
           currentNearestIndex, indexDiff <= 0 ? 0 : 1)!;
+      /*根据每个item的高度 计算出需要滑动的距离*/
       absoluteOffsetToViewport = math.max(
           offsetToLastState.offset + indexDiff * suggestedRowHeight!, 0);
     } else {
+      /*如果每个item的高度是不固定的 走这里*/
+      /*currentNearestIndex 滑动到顶部 或者底部 需要滑动的距离*/
       final offsetToLastState =
           _offsetToRevealInViewport(currentNearestIndex, alignment);
       assert((offsetToLastState?.offset ?? 0) >= 0,
@@ -406,9 +424,11 @@ mixin AutoScrollControllerMixin on ScrollController
     final end = _directionalOffsetToRevealInViewport(index, 1);
 
     if (preferPosition != null) {
+      /*todo 计算滚动到指定位置 需要移动的距离*/
       double targetOffset = _directionalOffsetToRevealInViewport(
           index, _positionToAlignment(preferPosition));
 
+      /*todo 最小可滚动距离 position.minScrollExtent*/
       if (targetOffset < position.minScrollExtent)
         targetOffset = position.minScrollExtent;
       else if (targetOffset > position.maxScrollExtent)
@@ -453,6 +473,7 @@ mixin AutoScrollControllerMixin on ScrollController
     if (tagOffsetInViewport == null) {
       return -1;
     } else {
+      /*todo 根据 alignment 动态的去移动一定距离*/
       double absoluteOffsetToViewport = tagOffsetInViewport.offset;
       if (alignment == 0.5) {
         return absoluteOffsetToViewport;
@@ -474,8 +495,15 @@ mixin AutoScrollControllerMixin on ScrollController
     assert(Scrollable.of(ctx) != null);
     final RenderAbstractViewport viewport =
         RenderAbstractViewport.of(renderBox)!;
-    final revealedOffset = viewport.getOffsetToReveal(renderBox, alignment);
 
+    /*todo alignment = 0 代表把item 移动到窗口顶部 需要移动的距离 对于每个item都是固定的*/
+    /*todo alignment = 1 代表把item 移动到窗口底部 需要移动的距离 对于每个item是固定的*/
+    /*这两个值 都是从列表最顶部开始算起*/
+    final revealedOffset = viewport.getOffsetToReveal(renderBox, alignment);
+    // print("###################################");
+    // print("cccccccccccccc===index===$index");
+    // print("cccccccccccccc===alignment===$alignment");
+    // print("cccccccccccccc===revealedOffset===${revealedOffset}");
     return revealedOffset;
   }
 }
@@ -487,6 +515,7 @@ void _cancelAllHighlights([AutoScrollTagState? state]) {
   _highlights.clear();
 }
 
+/*todo 每一个item 外层都会 包一个 AutoScrollTag*/
 class AutoScrollTag extends StatefulWidget {
   final AutoScrollController controller;
   final int index;
@@ -537,6 +566,8 @@ class AutoScrollTagState<W extends AutoScrollTag> extends State<W>
     super.dispose();
   }
 
+  /*todo didUpdateWidget 调用时机 学习？？？*/
+  /*todo 如果widget 发生改变 更新 tagMap 中的对象*/
   @override
   void didUpdateWidget(W oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -549,6 +580,7 @@ class AutoScrollTagState<W extends AutoScrollTag> extends State<W>
     }
   }
 
+  /*当 item 创建的时候 widget.controller.tagMap 添加 this*/
   void register(int index) {
     // the caller in initState() or dispose() is not in the order of first dispose and init
     // so we can't assert there isn't a existing key
@@ -566,6 +598,7 @@ class AutoScrollTagState<W extends AutoScrollTag> extends State<W>
       widget.controller.tagMap.remove(index);
   }
 
+  /*todo DecoratedBoxTransition 装饰动画 学习*/
   @override
   Widget build(BuildContext context) {
     return new DecoratedBoxTransition(

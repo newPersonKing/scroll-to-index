@@ -11,8 +11,11 @@ import 'package:flutter/animation.dart';
 
 /// used to invoke async functions in order
 Future<T> co<T>(key, FutureOr<T> action()) async {
+  /*todo 这里为什么要循环 */
+  /*todo 如果上次 action 没有执行完成 等待*/
   for (;;) {
     final c = _locks[key];
+    /*第一次进来 这里肯定是null*/
     if (c == null) break;
     try {
       await c.future;
@@ -35,6 +38,7 @@ Future<T> co<T>(key, FutureOr<T> action()) async {
   }
 
   try {
+    /*action 可以是异步从操作*/
     final result = action();
     if (result is Future<T>) {
       result.then(then).catchError(catchError);
